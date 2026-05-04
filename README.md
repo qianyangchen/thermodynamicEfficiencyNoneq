@@ -7,7 +7,7 @@ Simulation codes for computing the thermodynamic efficiency of two nonequilibriu
 ## Models
 
 ### Persistent Ising Model
-A nonequilibrium Ising model in which detailed balance is broken by introducing persistent (non-reversible) spin-flip dynamics.
+A nonequilibrium Ising model in which detailed balance is broken by introducing a constant bias to the spin-flip dynamics.
 
 > Reference: M. Kumar and C. Dasgupta, *Nonequilibrium phase transition in an Ising model without detailed balance*, Phys. Rev. E **102**, 052111 (2020).
 
@@ -58,27 +58,27 @@ pip install -r requirements.txt
 
 ### Running Simulations
 
-<!-- TODO: describe how to run the simulation scripts, e.g.:
+All core functions are contained in pim_core.py and aim_core.py for the persistent Ising model and active Ising model, respectively. Example usage of the core functions are shown in pim_sim.py and aim_sim.py. The data generated for this manuscript is run in batches on the National Computational Infrastructure (NCI):
 ```bash
 cd persistent_ising/simulation
-python <script_name>.py
+python pim_sim.py
 ```
 -->
 
 ### Generating Figures
 
-<!-- TODO: describe how to open and run the notebooks, e.g.:
+Run the notebook to load and visualise sample data:
 ```bash
 cd persistent_ising/notebooks
-jupyter notebook <notebook_name>.ipynb
+jupyter notebook aim.ipynb
 ```
--->
+
 
 ---
 
 ## Citation
 
-<!-- TODO: add the full citation for your manuscript once it is published. -->
+<!-- TODO: add the full citation for manuscript once it is published. -->
 
 If you use this code, please cite:
 
