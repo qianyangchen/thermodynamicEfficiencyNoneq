@@ -1,6 +1,6 @@
 # thermodynamicEfficiencyNoneq
 
-Simulation codes for computing the thermodynamic efficiency of two nonequilibrium spin models: the **persistent Ising model** and the **active Ising model**. This repository accompanies a manuscript submitted to *Physical Review Research*.
+Simulation codes for computing the thermodynamic efficiency of two nonequilibrium spin models: the **persistent Ising model** and the **active Ising model**. This repository accompanies the manuscript: Q. Chen and M. Prokopenko, *Thermodynamic efficiency of self-organisation in nonequilibrium steady states* (2026).
 
 ---
 
@@ -9,14 +9,15 @@ Simulation codes for computing the thermodynamic efficiency of two nonequilibriu
 ### Persistent Ising Model
 A nonequilibrium Ising model in which detailed balance is broken by introducing a constant bias to the spin-flip dynamics.
 
-> Reference: M. Kumar and C. Dasgupta, *Nonequilibrium phase transition in an Ising model without detailed balance*, Phys. Rev. E **102**, 052111 (2020).
+> Reference: 
+> - [1] M. Kumar and C. Dasgupta, *Nonequilibrium phase transition in an Ising model without detailed balance*, Phys. Rev. E **102**, 052111 (2020).
 
 ### Active Ising Model
 A two-dimensional active-spin model combining Ising-like alignment with self-propulsion, exhibiting a flocking transition.
 
 > References:
-> - A. P. Solon and J. Tailleur, *Revisiting the Flocking Transition Using Active Spins*, Phys. Rev. Lett. **111**, 078101 (2013).
-> - A. P. Solon and J. Tailleur, *Flocking with discrete symmetry: The two-dimensional active Ising model*, Phys. Rev. E **92**, 042119 (2015).
+> - [2] A. P. Solon and J. Tailleur, *Revisiting the Flocking Transition Using Active Spins*, Phys. Rev. Lett. **111**, 078101 (2013).
+> - [3] A. P. Solon and J. Tailleur, *Flocking with discrete symmetry: The two-dimensional active Ising model*, Phys. Rev. E **92**, 042119 (2015).
 
 ---
 
@@ -40,12 +41,6 @@ thermodynamicEfficiencyNoneq/
 
 ## Requirements
 
-- Python 3.x
-- [NumPy](https://numpy.org/)
-- [SciPy](https://scipy.org/)
-- [Matplotlib](https://matplotlib.org/)
-- [Jupyter](https://jupyter.org/)
-
 Install all dependencies with:
 
 ```bash
@@ -54,40 +49,67 @@ pip install -r requirements.txt
 
 ---
 
-## Usage
+## Quick Start
 
-### Running Simulations
+### 1. Running Simulations
+All core simulation functions are contained in pim_core.py (for the persistent Ising model [1]) and aim_core.py (for the active Ising model[2,3]).
 
-All core functions are contained in pim_core.py and aim_core.py for the persistent Ising model and active Ising model, respectively. Example usage of the core functions are shown in pim_sim.py and aim_sim.py. The data generated for this manuscript is run in batches on the National Computational Infrastructure (NCI):
+**Local Examples:**
+Example usage of the core functions is shown in pim_sim.py and aim_sim.py. You can run these locally to test the simulations:
+
+persistent Ising model:
+
 ```bash
 cd persistent_ising/simulation
 python pim_sim.py
 ```
--->
 
-### Generating Figures
-
-Run the notebook to load and visualise sample data:
+active Ising model:
 ```bash
-cd persistent_ising/notebooks
-jupyter notebook aim.ipynb
+cd active_ising/simulation
+python aim_sim.py
 ```
 
+**HPC / Cluster Execution:**
+Please note that the data generated for this manuscript was run on the National Computational Infrastructure (NCI).
+
+### 2. Generating Figures & Data Analysis
+We provide Jupyter notebooks to load, analyse, and visualise the sample data.
+
+For the persistent Ising Model, run:
+
+```bash
+cd persistent_ising/notebooks
+jupyter notebook pim.ipynb
+```
+
+For the active Ising Model, run:
+
+```bash
+cd active_ising/notebooks
+jupyter notebook activeIsing.ipynb
+```
 
 ---
 
-## Citation
+## Citing
 
-<!-- TODO: add the full citation for manuscript once it is published. -->
 
 If you use this code, please cite:
 
-> [Author(s)], *[Title]*, *Physical Review Research* (submitted).
+> Qianyang Chen and Mikhail Prokopenko, *Thermodynamic efficiency of self-organisation in nonequilibrium steady states*, arXiv:xxxx.xxxxx [nlin.AO] (2026).
+Available at: [https://arxiv.org/abs/xxxx.xxxxx](https://arxiv.org/abs/xxxx.xxxxx)
 
-and the relevant model references listed above.
+**Bibtex**
 
----
-
-## License
-
-This project is licensed under the terms of the [LICENSE](LICENSE) file.
+```bibtex
+@article{chen2026therm,
+  author  = {Chen, Qianyang and Prokopenko, Mikhail},
+  title   = {Thermodynamic efficiency of self-organisation in nonequilibrium steady states},
+  journal = {arXiv preprint arXiv:xxxx.xxxxx},
+  year    = {2026},
+  eprint  = {xxxx.xxxxx},
+  archivePrefix = {arXiv},
+  primaryClass = {nlin.AO}
+}
+```

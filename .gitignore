@@ -1,0 +1,6 @@
+# Ignore large data files
+persistent_ising/data/pim_50x50.json
+
+# Ignore virtual environments and cache
+venv/
+__pycache__/
