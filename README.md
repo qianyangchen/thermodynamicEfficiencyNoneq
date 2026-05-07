@@ -1,6 +1,6 @@
 # thermodynamicEfficiencyNoneq
 
-Simulation codes for computing the thermodynamic efficiency of two nonequilibrium spin models: the **persistent Ising model** and the **active Ising model**. This repository accompanies the manuscript: Q. Chen and M. Prokopenko, *Thermodynamic efficiency of self-organisation in nonequilibrium steady states* (2026).
+Simulation codes for computing the thermodynamic efficiency of two nonequilibrium spin models: the **persistent Ising model** and the **active Ising model**. This repository accompanies the manuscript: Q. Chen and M. Prokopenko, *Thermodynamic efficiency of self-organisation in nonequilibrium steady states* 	[arXiv:2605.04508](https://arxiv.org/abs/2605.04508) (2026).
 
 ---
 
@@ -97,8 +97,8 @@ jupyter notebook activeIsing.ipynb
 
 If you use this code, please cite:
 
-> Qianyang Chen and Mikhail Prokopenko, *Thermodynamic efficiency of self-organisation in nonequilibrium steady states*, arXiv:xxxx.xxxxx [nlin.AO] (2026).
-Available at: [https://arxiv.org/abs/xxxx.xxxxx](https://arxiv.org/abs/xxxx.xxxxx)
+> Qianyang Chen and Mikhail Prokopenko, *Thermodynamic efficiency of self-organisation in nonequilibrium steady states*, arXiv:2605.04508 [nlin.AO] (2026).
+Available at: [https://arxiv.org/abs/2605.04508](https://arxiv.org/abs/2605.04508)
 
 **Bibtex**
 
@@ -106,9 +106,9 @@ Available at: [https://arxiv.org/abs/xxxx.xxxxx](https://arxiv.org/abs/xxxx.xxxx
 @article{chen2026therm,
   author  = {Chen, Qianyang and Prokopenko, Mikhail},
   title   = {Thermodynamic efficiency of self-organisation in nonequilibrium steady states},
-  journal = {arXiv preprint arXiv:xxxx.xxxxx},
+  journal = {arXiv preprint arXiv:2605.04508},	
   year    = {2026},
-  eprint  = {xxxx.xxxxx},
+  eprint  = {2605.04508},
   archivePrefix = {arXiv},
   primaryClass = {nlin.AO}
 }
