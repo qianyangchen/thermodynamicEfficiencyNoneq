@@ -55,23 +55,23 @@ pip install -r requirements.txt
 All core simulation functions are contained in pim_core.py (for the persistent Ising model [1]) and aim_core.py (for the active Ising model[2,3]).
 
 **Local Examples:**
-Example usage of the core functions is shown in pim_sim.py and aim_sim.py. You can run these locally to test the simulations:
+Example usage of the core functions is shown in pim_example.py and aim_example.py. You can run these locally to test the simulations:
 
 persistent Ising model:
 
 ```bash
 cd persistent_ising/simulation
-python pim_sim.py
+python pim_example.py
 ```
 
 active Ising model:
 ```bash
 cd active_ising/simulation
-python aim_sim.py
+python aim_example.py
 ```
 
 **HPC / Cluster Execution:**
-Please note that the data generated for this manuscript was run on the National Computational Infrastructure (NCI).
+Please note that the data generated for this manuscript was run on the National Computational Infrastructure (NCI) using distributed computing. The code is provided in the `simulation` folder of the respective models. To reproduce this workflow, users will need to run `X_sim.py` first and then `X_merge.py` to combine the results obtained in different nodes.
 
 ### 2. Generating Figures & Data Analysis
 We provide Jupyter notebooks to load, analyse, and visualise the sample data.

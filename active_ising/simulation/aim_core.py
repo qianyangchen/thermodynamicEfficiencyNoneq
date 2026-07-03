@@ -1,3 +1,5 @@
+# THIS IS THE NEW ONE, ONLY MAKE EDITS HERE
+
 #!/usr/bin/env python
 import json
 import numpy as np
@@ -7,9 +9,6 @@ from joblib import Parallel, delayed
 import time
 import datetime
 from numpy.linalg import eigvals
-
-TOLERANCE = 1e-9 # for root classification
-
 # core
 #--------------------------------------------------------------------------
 # Low-level (Numba-accelerated) functions
@@ -43,35 +42,36 @@ def initialize_system(Lx, Ly, rho0, beta, J, h, D):
 
     return pos_x, pos_y, spins, n_plus, n_minus, N, dt
 
-
 @njit(cache=True)
-def step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h):
-    """
-    Take one step in simulation for one randomly chosen particle.
-    """
+def step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, 
+               flip_table, p_R_const, p_L_const, p_UD_const, max_rho):
     Lx, Ly = n_plus.shape
-    N = len(pos_x)
 
-    # randomly choose a particle to act on
     idx = np.random.randint(N)
     s = spins[idx]
     x = pos_x[idx]
     y = pos_y[idx]
+    
     rho = n_plus[x, y] + n_minus[x, y]
     m = n_plus[x, y] - n_minus[x, y]
-    flip_rate = np.exp(-beta * s * (J * m / rho + h))
+    
+    s_idx = 0 if s == -1 else 1 # for lookup table indexing
 
-    # Partition probability space with a SINGLE random number
+    # 1. EXPONENTIAL LOOKUP
+    if rho <= max_rho:
+        p_flip = flip_table[s_idx, rho, m + max_rho]
+    else:
+        # Fallback just in case density spikes above cap
+        p_flip = np.exp(-beta * s * (J * m / rho + h)) * dt
+
+    # 2. PRECOMPUTED CONSTANTS
+    p_R = p_flip + p_R_const[s_idx]
+    p_L = p_R + p_L_const[s_idx]
+    p_U = p_L + p_UD_const
+    p_D = p_U + p_UD_const
+
     r = np.random.rand()
 
-    # Cumulative probability thresholds, actions are mutually exclusive.
-    p_flip = flip_rate * dt
-    p_R = p_flip + D * (1.0 + s * epsilon) * dt
-    p_L = p_R + D * (1.0 - s * epsilon) * dt
-    p_U = p_L + D * dt
-    p_D = p_U + D * dt
-
-    # Execute event
     if r < p_flip:
         spins[idx] = -s
         if s == 1:
@@ -82,7 +82,10 @@ def step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J,
             n_plus[x, y] += 1
 
     elif r < p_R:
-        new_x = (x + 1) % Lx
+        new_x = x + 1
+        if new_x == Lx:
+            new_x = 0 #periodic boundary
+            
         pos_x[idx] = new_x
         if s == 1:
             n_plus[x, y] -= 1
@@ -92,7 +95,10 @@ def step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J,
             n_minus[new_x, y] += 1
 
     elif r < p_L:
-        new_x = (x - 1) % Lx
+        new_x = x - 1
+        if new_x < 0:
+            new_x = Lx - 1 #periodic boundary
+            
         pos_x[idx] = new_x
         if s == 1:
             n_plus[x, y] -= 1
@@ -102,7 +108,10 @@ def step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J,
             n_minus[new_x, y] += 1
 
     elif r < p_U:
-        new_y = (y + 1) % Ly
+        new_y = y + 1
+        if new_y == Ly:
+            new_y = 0 #periodic boundary
+            
         pos_y[idx] = new_y
         if s == 1:
             n_plus[x, y] -= 1
@@ -112,7 +121,10 @@ def step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J,
             n_minus[x, new_y] += 1
 
     elif r < p_D:
-        new_y = (y - 1) % Ly
+        new_y = y - 1
+        if new_y < 0:
+            new_y = Ly - 1 #periodic boundary
+            
         pos_y[idx] = new_y
         if s == 1:
             n_plus[x, y] -= 1
@@ -121,42 +133,154 @@ def step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J,
             n_minus[x, y] -= 1
             n_minus[x, new_y] += 1
 
-    # If r > p_D, the particle does nothing.
+@njit(cache=True)
+def step_numba_epr(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, flip_table, p_R_const, p_L_const, p_UD_const, max_rho):
+    Lx, Ly = n_plus.shape
 
+    # 1. choose one particle
+    idx = np.random.randint(N)
+    s = spins[idx]
+    x = pos_x[idx]
+    y = pos_y[idx]
+    
+    rho = n_plus[x, y] + n_minus[x, y]
+    m = n_plus[x, y] - n_minus[x, y]
+    
+    s_idx = 0 if s == -1 else 1 # for lookup table indexing
+
+    # 2. check events (precomputed probabilities)
+    if rho <= max_rho:
+        p_flip = flip_table[s_idx, rho, m + max_rho]
+    else:
+        # Fallback just in case density spikes above cap
+        p_flip = np.exp(-beta * s * (J * m / rho + h)) * dt
+
+    p_R = p_flip + p_R_const[s_idx]
+    p_L = p_R + p_L_const[s_idx]
+    p_U = p_L + p_UD_const
+    p_D = p_U + p_UD_const
+    log_ratio = 0.0  # Default log ratio for no-op or up/down moves (no time-reversal asymmetry there)
+
+    r = np.random.rand()
+
+    if r < p_flip: # flip
+        spins[idx] = -s
+        if s == 1:
+            n_plus[x, y] -= 1
+            n_minus[x, y] += 1
+        else:
+            n_minus[x, y] -= 1
+            n_plus[x, y] += 1
+        m_after = m - 2 * s
+        if rho <= max_rho:
+            p_flip_rev = flip_table[s_idx ^ 1, rho, m_after + max_rho] # flip spin index for lookup
+        else:
+            # Fallback: use +beta instead because the spin is flipped (-s)
+            p_flip_rev = np.exp(beta * s * (J * m_after / rho + h)) * dt
+        log_ratio = np.log(p_flip / p_flip_rev)
+
+    elif r < p_R: # move right
+        new_x = x + 1
+        if new_x == Lx:
+            new_x = 0 #periodic boundary
+            
+        pos_x[idx] = new_x
+        if s == 1:
+            n_plus[x, y] -= 1
+            n_plus[new_x, y] += 1
+        else:
+            n_minus[x, y] -= 1
+            n_minus[new_x, y] += 1
+        log_ratio = np.log((1.0 + s * epsilon) / (1.0 - s * epsilon))
+    
+    elif r < p_L: # move left
+        new_x = x - 1
+        if new_x < 0:
+            new_x = Lx - 1 #periodic boundary
+            
+        pos_x[idx] = new_x
+        if s == 1:
+            n_plus[x, y] -= 1
+            n_plus[new_x, y] += 1
+        else:
+            n_minus[x, y] -= 1
+            n_minus[new_x, y] += 1
+        log_ratio = np.log((1.0 - s * epsilon) / (1.0 + s * epsilon))
+    
+    elif r < p_U: # move up
+        new_y = y + 1
+        if new_y == Ly:
+            new_y = 0 #periodic boundary
+            
+        pos_y[idx] = new_y
+        if s == 1:
+            n_plus[x, y] -= 1
+            n_plus[x, new_y] += 1
+        else:
+            n_minus[x, y] -= 1
+            n_minus[x, new_y] += 1
+    
+    elif r < p_D: # move down
+        new_y = y - 1
+        if new_y < 0:
+            new_y = Ly - 1 #periodic boundary
+            
+        pos_y[idx] = new_y
+        if s == 1:
+            n_plus[x, y] -= 1
+            n_plus[x, new_y] += 1
+        else:
+            n_minus[x, y] -= 1
+            n_minus[x, new_y] += 1
+    return log_ratio
 
 @njit(cache=True)
-def run_sweeps_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_sweeps):
+def run_sweeps_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_sweeps, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell):
+    """
+    Each sweep = N updates. N is the total number of particles. For relaxing the system to NESS.
+    """
+    for _ in range(n_sweeps):
+        for _ in range(N):
+            step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell)
+
+@njit(cache=True)
+def run_sweeps_numba_epr(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_sweeps, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell):
     """
     Each sweep = N updates. N is the total number of particles.
     """
-    N = len(pos_x)
+    # record log ratio for all attempt updates in the last sweep only
+    log_ratios = np.zeros(N)
     for _ in range(n_sweeps):
-        for _ in range(N):
-            step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h)
-
+        for i in range(N):
+            log_ratios[i] = step_numba_epr(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell)
+    return log_ratios
 
 @njit(cache=True)
-def run_sweeps_with_snapshots(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_sweeps, snapshot_sweeps, snapshots_plus, snapshots_minus):
+def run_sweeps_with_snapshots(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_sweeps, snapshot_sweeps, snapshots_plus, snapshots_minus, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell):
     """
     Runs the simulation for a total of n_sweeps, and saves snapshots of n_plus and n_minus at specified sweeps.
-    snapshot_sweeps: list of sweep numbers at which to save snapshots (e.g. [0, 10, 100, 1000])
-    snapshots_plus/minus: pre-allocated arrays of shape (len(snapshot_sweeps), Lx, Ly) to store the snapshots.
+    snapshot_sweeps: a 1D Numpy array of sweeps at which to save snapshots (e.g., np.array([0, 100, 500, 1000]))
     """
-    N = len(pos_x)
     n_snaps = len(snapshot_sweeps)
     snap_idx = 0
 
-    for sweep in range(n_sweeps):
+    # 1. Capture the initial state (sweep 0) BEFORE any simulation runs
+    if snap_idx < n_snaps and snapshot_sweeps[snap_idx] == 0:
+        snapshots_plus[snap_idx] = n_plus.copy()
+        snapshots_minus[snap_idx] = n_minus.copy()
+        snap_idx += 1
+
+    # 2. Run sweeps from 1 to n_sweeps (inclusive) to reach the 5000 target
+    for sweep in range(1, n_sweeps + 1):
         # run one sweep (N updates)
         for _ in range(N):
-            step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h)
+            step_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell)
 
-        # check if current sweep is a snapshot
+        # 3. Check if current sweep is a snapshot target
         if snap_idx < n_snaps and sweep == snapshot_sweeps[snap_idx]:
-            snapshots_plus[snap_idx] = n_plus
-            snapshots_minus[snap_idx] = n_minus
+            snapshots_plus[snap_idx] = n_plus.copy()
+            snapshots_minus[snap_idx] = n_minus.copy()
             snap_idx += 1
-
 
 @njit(cache=True)
 def compute_energy_components(n_plus, n_minus):
@@ -178,7 +302,6 @@ def compute_energy_components(n_plus, n_minus):
                 E_h += m
     return E_J, E_h
 
-
 @njit(cache=True)
 def compute_total_energy(n_plus, n_minus, J, h):
     """
@@ -188,7 +311,6 @@ def compute_total_energy(n_plus, n_minus, J, h):
     E_J, E_h = compute_energy_components(n_plus, n_minus)
     energy = -J * E_J - h * E_h
     return energy
-
 
 @njit(cache=True)
 def accumulate_ness_histogram(n_plus, n_minus, hist):
@@ -229,6 +351,7 @@ def accumulate_ness_histogram(n_plus, n_minus, hist):
             nm_val = min(n_minus[x, y], max_n)
             hist[shifted_x, np_val, nm_val] += 1
 
+
 #--------------------------------------------------------------------------
 # High-level sweeping functions (for evolution, keep snapshots)
 #--------------------------------------------------------------------------
@@ -237,14 +360,12 @@ def ensure_list(x):
         return [x]
     return list(x)
 
-
 def generate_simulation_seeds(n_sims, master_seed=12345):
     rng = np.random.default_rng(master_seed)
     return rng.integers(0, 2**31, size=n_sims, dtype=np.int64)
 
-
 def run_evolution_and_save(Lx, Ly, rho0, beta, epsilon, D, J, h,
-                           n_sweeps, snapshot_sweeps, output_dir, seed):
+                           n_sweeps, snapshot_sweeps, output_dir, seed, max_particles_per_cell):
     """
     MODE 1: Run the system for n_sweeps, keep snapshots at specified sweeps.
     """
@@ -256,21 +377,41 @@ def run_evolution_and_save(Lx, Ly, rho0, beta, epsilon, D, J, h,
     print(f"[{timestamp}] START: {params_str}")
     # ---- End logging ----
 
-    # initialize system with an explicit per-simulation seed
+    # 1. initialize system with an explicit per-simulation seed
     seed_numba(seed)
     pos_x, pos_y, spins, n_plus, n_minus, N, dt = \
         initialize_system(Lx, Ly, rho0, beta, J, h, D=D)
 
     n_snaps = len(snapshot_sweeps)
-    snapshots_plus = np.zeros((n_snaps, Lx, Ly), dtype=np.int16)
-    snapshots_minus = np.zeros((n_snaps, Lx, Ly), dtype=np.int16)
+    snapshots_plus = np.zeros((n_snaps, Lx, Ly), dtype=np.int32)
+    snapshots_minus = np.zeros((n_snaps, Lx, Ly), dtype=np.int32)
 
+    # 2. precompute rates to save time in the inner loop
+    # Calculate hopping probability constants [s=-1, s=+1]
+    p_R_const = np.array([D * (1.0 - epsilon) * dt, D * (1.0 + epsilon) * dt])
+    p_L_const = np.array([D * (1.0 + epsilon) * dt, D * (1.0 - epsilon) * dt])
+    p_UD_const = D * dt
+
+    # Build the np.exp() lookup table
+    # Shape: (2 spins, max_rho + 1, max_rho*2 + 1 to handle negative m)
+    flip_table = np.zeros((2, max_particles_per_cell + 1, max_particles_per_cell * 2 + 1))
+    for s_val in (-1, 1):
+        s_idx = 0 if s_val == -1 else 1
+        for r_val in range(1, max_particles_per_cell + 1):
+            for m_val in range(-r_val, r_val + 1):
+                m_idx = m_val + max_particles_per_cell # Shift index to avoid negative arrays
+                flip_rate = np.exp(-beta * s_val * (J * m_val / r_val + h))
+                flip_table[s_idx, r_val, m_idx] = flip_rate * dt
+
+    # 3. run sweeps
     run_sweeps_with_snapshots(pos_x, pos_y, spins, n_plus, n_minus, N, dt,
         beta, D, epsilon, J, h,
-        n_sweeps, snapshot_sweeps, snapshots_plus, snapshots_minus
+        n_sweeps, snapshot_sweeps, snapshots_plus, snapshots_minus, 
+        flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell
     )
 
-    filename = f"snapshots_L{Lx}x{Ly}_rho{rho0:.0f}_beta{beta:.1f}_eps{epsilon:.1f}_J{J:.1f}_h{h:.1f}.npz"
+    # make filename unique and readable
+    filename = f"aim_L{Lx}x{Ly}_rho{rho0:.0f}_beta{beta:.1f}_eps{epsilon:.2f}_J{J:.2f}_h{h:.3f}.npz"
     path = os.path.join(output_dir, filename)
 
     np.savez_compressed(
@@ -290,86 +431,11 @@ def run_evolution_and_save(Lx, Ly, rho0, beta, epsilon, D, J, h,
 
     return path
 
+
 #--------------------------------------------------------------------------
 # High-level sweeping functions (for ness, no snapshots)
+# returns profile and entropy production rate
 #--------------------------------------------------------------------------
-
-def run_single_ness(Lx, Ly, rho0, beta, epsilon, D, J, h,
-                    n_relax_sweeps, n_samples, max_particles_per_cell, seed):
-    """
-    MODE 2: Run one simulation to NESS, aggregate entropy histograms on-the-fly, compute final energy.
-    n_relax_sweeps: number of sweeps to relax the system to NESS before sampling.
-    n_samples: number of snapshots to sample after relaxation, for histogram and energy estimation.
-    """
-
-    # 0. initialize system with an explicit per-simulation seed
-    seed_numba(seed)
-    pos_x, pos_y, spins, n_plus, n_minus, N, dt = \
-        initialize_system(Lx, Ly, rho0, beta, J, h, D=D)
-    
-    # 1. relax to NESS
-    run_sweeps_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_relax_sweeps)
-
-    # 2. allocate histogram array for entropy, and a variable to accumulate energy
-    # Each element: [x_coord, num_plus, num_minus], counts how many times we see (ni+,ni-) at that x-coordinate in the comoving frame.
-    hist = np.zeros((Lx, max_particles_per_cell, max_particles_per_cell), dtype=np.int64)
-    accumulate_ness_energy = 0.0
-    EJ_list = []
-    Eh_list = []
-
-    # 3. sampling snapshots, accumulate histogram and energy on-the-fly
-    for _ in range(n_samples):
-        # make one sweep, then accumulate histogram for this snapshot
-        run_sweeps_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, 1)
-        accumulate_ness_histogram(n_plus, n_minus, hist)
-        accumulate_ness_energy += compute_total_energy(n_plus, n_minus, J, h)
-        EJ, Eh = compute_energy_components(n_plus, n_minus)
-        EJ_list.append(EJ)
-        Eh_list.append(Eh)
-    
-    # 4. compute final energy
-    mean_energy = accumulate_ness_energy / n_samples
-
-    # 5. compute total entropy from the histogram
-    total_entropy = 0.0
-    for x in range(Lx):
-        # For location x, flatten the 2D grid of (n+, n-) counts for this x-coordinate
-        counts = hist[x].flatten()
-        total_samples = np.sum(counts)
-        
-        if total_samples > 0:
-            # Filter out zero-counts to avoid log(0)
-            probs = counts[counts > 0] / total_samples
-            S_x = -np.sum(probs * np.log(probs))
-            
-            # Multiply by Ly (total entropy for Ly cells at this x-coordinate)
-            total_entropy += S_x * Ly
-    
-    return total_entropy, mean_energy, EJ_list, Eh_list
-
-
-def run_multiple_ness(params, n_relax_sweeps, n_sample_sweeps,
-                      max_particles_per_cell, n_sims, n_jobs=1, master_seed=12345):
-    """
-    Run multiple NESS simulations in parallel and collect results.
-    params: dictionary of parameters (Lx, Ly, rho0, beta, epsilon, D, J, h)
-    Returns a list of tuples: [(entropy1, energy1, EJ1, Eh1), (entropy2, energy2, EJ2, Eh2), ...]
-    """
-    seeds = generate_simulation_seeds(n_sims, master_seed=master_seed)
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(run_single_ness)(
-            params['Lx'], params['Ly'], params['rho0'], params['beta'],
-            params['epsilon'], params['D'], params['J'], params['h'],
-            n_relax_sweeps, n_sample_sweeps, max_particles_per_cell, int(seeds[i])
-        )
-        for i in range(n_sims)
-    )
-    return results
-
-#--------------------------------------------------------------------------
-# Profile Extraction and Extended NESS Functions (for ness, no snapshots)
-#--------------------------------------------------------------------------
-
 @njit(cache=True)
 def compute_shifted_profiles(n_plus, n_minus):
     """
@@ -415,22 +481,49 @@ def compute_shifted_profiles(n_plus, n_minus):
         
     return rho_x, m_x
 
-
-def run_single_ness_with_profiles(Lx, Ly, rho0, beta, epsilon, D, J, h,
+def run_single_ness(Lx, Ly, rho0, beta, epsilon, D, J, h,
                     n_relax_sweeps, n_samples, max_particles_per_cell, seed):
     """
-    Extended version of run_single_ness to include profiles rho_x, m_x.
+    MODE 2: Run the system until it relaxes to NESS, then sample snapshots to compute final profiles and EPR.
+     - n_relax_sweeps: number of sweeps to run for relaxation before sampling
+     - n_samples: number of snapshots to sample after relaxation for computing averages
+     - max_particles_per_cell: cap for histogram binning to prevent out-of-bounds errors
+     Returns: 
+     total_entropy (float), mean_energy (float), 
+     EJ_list (list), Eh_list (list): lists of the separate energy components for each sampled snapshot
+     mean_rho_x (array), mean_m_x (array): time-averaged profiles across all sampled snapshots
+     final_rho_x (array), final_m_x (array): profile from from the last sampled snapshot
+     entropy_production_rate (float): computed as the average log ratio of forward/reverse path probabilities across all attempted updates in the sampled snapshots. At steady state this tis the total (i.e., system + bath) EPR.
+     Note: The profiles returned here are already shifted to the comoving frame using the circular center of mass method.
     """
     # 0. initialize system
     seed_numba(seed)
     pos_x, pos_y, spins, n_plus, n_minus, N, dt = \
         initialize_system(Lx, Ly, rho0, beta, J, h, D=D)
     
-    # 1. relax to NESS
-    run_sweeps_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_relax_sweeps)
+    # 1. precompute rates to save time in the inner loop
+    # Calculate hopping probability constants [s=-1, s=+1]
+    p_R_const = np.array([D * (1.0 - epsilon) * dt, D * (1.0 + epsilon) * dt])
+    p_L_const = np.array([D * (1.0 + epsilon) * dt, D * (1.0 - epsilon) * dt])
+    p_UD_const = D * dt
+
+    # Build the np.exp() lookup table
+    # Shape: (2 spins, max_rho + 1, max_rho*2 + 1 to handle negative m)
+    flip_table = np.zeros((2, max_particles_per_cell + 1, max_particles_per_cell * 2 + 1))
+    for s_val in (-1, 1):
+        s_idx = 0 if s_val == -1 else 1
+        for r_val in range(1, max_particles_per_cell + 1):
+            for m_val in range(-r_val, r_val + 1):
+                m_idx = m_val + max_particles_per_cell # Shift index to avoid negative arrays
+                flip_rate = np.exp(-beta * s_val * (J * m_val / r_val + h))
+                flip_table[s_idx, r_val, m_idx] = flip_rate * dt
+    
+    # 2. relax to NESS
+    run_sweeps_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, n_relax_sweeps, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell)
 
     hist = np.zeros((Lx, max_particles_per_cell, max_particles_per_cell), dtype=np.int64)
     accumulate_ness_energy = 0.0
+    accumulate_entropy_production = 0.0
     EJ_list = []
     Eh_list = []
     
@@ -438,9 +531,10 @@ def run_single_ness_with_profiles(Lx, Ly, rho0, beta, epsilon, D, J, h,
     sum_rho_x = np.zeros(Lx, dtype=np.float64)
     sum_m_x = np.zeros(Lx, dtype=np.float64)
 
-    # 3. sampling snapshots
+    # 3. sampling sweeps
     for _ in range(n_samples):
-        run_sweeps_numba(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, 1)
+        log_ratios = run_sweeps_numba_epr(pos_x, pos_y, spins, n_plus, n_minus, N, dt, beta, D, epsilon, J, h, 1, flip_table, p_R_const, p_L_const, p_UD_const, max_particles_per_cell)
+        accumulate_entropy_production += np.sum(log_ratios) # log_ratios is an array of all attempted updates in the sweep, including no-ops.
         accumulate_ness_histogram(n_plus, n_minus, hist)
         accumulate_ness_energy += compute_total_energy(n_plus, n_minus, J, h)
         EJ, Eh = compute_energy_components(n_plus, n_minus)
@@ -452,7 +546,7 @@ def run_single_ness_with_profiles(Lx, Ly, rho0, beta, epsilon, D, J, h,
         sum_rho_x += snap_rho_x
         sum_m_x += snap_m_x
         
-    # 4. compute final energy and entropy
+    # 4. compute final energy, final entropy and EPR
     mean_energy = accumulate_ness_energy / n_samples
     total_entropy = 0.0
     for x in range(Lx):
@@ -462,6 +556,7 @@ def run_single_ness_with_profiles(Lx, Ly, rho0, beta, epsilon, D, J, h,
             probs = counts[counts > 0] / total_samples
             S_x = -np.sum(probs * np.log(probs))
             total_entropy += S_x * Ly
+    entropy_production_rate = accumulate_entropy_production / (n_samples * dt) # each sweep corresponds to physical time dt. 
 
     # 5. Compute time-averaged and final profiles
     mean_rho_x = sum_rho_x / n_samples
@@ -469,17 +564,16 @@ def run_single_ness_with_profiles(Lx, Ly, rho0, beta, epsilon, D, J, h,
     final_rho_x = snap_rho_x   # State of the last snapshot taken
     final_m_x = snap_m_x
     
-    return total_entropy, mean_energy, EJ_list, Eh_list, mean_rho_x, mean_m_x, final_rho_x, final_m_x
+    return total_entropy, mean_energy, EJ_list, Eh_list, mean_rho_x, mean_m_x, final_rho_x, final_m_x, entropy_production_rate
 
-
-def run_multiple_ness_with_profiles(params, n_relax_sweeps, n_sample_sweeps,
+def run_multiple_ness(params, n_relax_sweeps, n_sample_sweeps,
                       max_particles_per_cell, n_sims, n_jobs=1, master_seed=12345):
     """
-    Parallel wrapper for run_single_ness_with_profiles.
+    Parallel wrapper for run_single_ness.
     """
-    seeds = generate_simulation_seeds(n_sims, master_seed=master_seed)
+    seeds = generate_simulation_seeds(n_sims, master_seed=master_seed) # use same master seed for different (J, h) pairs so that simulation with the same ID across pairs have the same initial conditions.
     results = Parallel(n_jobs=n_jobs)(
-        delayed(run_single_ness_with_profiles)(
+        delayed(run_single_ness)(
             params['Lx'], params['Ly'], params['rho0'], params['beta'],
             params['epsilon'], params['D'], params['J'], params['h'],
             n_relax_sweeps, n_sample_sweeps, max_particles_per_cell, int(seeds[i])
@@ -581,7 +675,7 @@ def classify_point(rho0, beta, h, J, v, D, alpha_m):
         "label": label
     }
 
-def compute_h_J_phase(hs, Js, rho0, D, alpha_m, epsilon, beta=1.0):
+def compute_h_J_phase(hs, Js, rho0, D, alpha_m, epsilon, beta=1.0, output_path="phase_diagram.json"):
     phase = np.zeros((len(hs), len(Js)), dtype=int)
 
     for i, h in enumerate(hs):
@@ -597,21 +691,23 @@ def compute_h_J_phase(hs, Js, rho0, D, alpha_m, epsilon, beta=1.0):
             elif out["label"] == "multistable homogeneous roots":
                 phase[i, j] = 3
 
-    return phase
+    # save data to json file
+    with open(output_path, 'w') as f:
+        json.dump({
+            "hs": hs.tolist(),
+            "Js": Js.tolist(),
+            "phase": phase.tolist(),
+            "rho0": rho0,
+            "beta": beta,
+            "v": 2*D*epsilon,
+            "D": D,
+            "alpha_m": alpha_m
+        }, f)
 
 
 #--------------------------------------------------------------------------
-# Data visualisation and analysis functions
+# Analysis functions
 #--------------------------------------------------------------------------
-# get snapshot and profiles
-def get_snapshot_and_profiles(snapdata, idx=-1):
-    snapshots_plus = snapdata['snapshots_plus']
-    snapshots_minus = snapdata['snapshots_minus']
-    snapshot = snapshots_plus[idx] - snapshots_minus[idx]
-    rho_x = (snapshots_plus[idx] + snapshots_minus[idx]).mean(axis=1)
-    m_x = (snapshots_plus[idx] - snapshots_minus[idx]).mean(axis=1)
-    return snapshot, rho_x, m_x
-
 def get_profiles_multi_sim(data, idxs=[-1]):
     rho_x = data['final_rho_x'] # shape (n_Js, n_sims, Lx)
     m_x = data['final_m_x'] # shape (n_Js, n_sims, Lx)
@@ -620,19 +716,15 @@ def get_profiles_multi_sim(data, idxs=[-1]):
     m_x_multi = m_x[idxs]
     return rho_x_multi, m_x_multi
 
-# compute eta
 def compute_eta_first_principles(data):
     entropies = data['entropies']
     E_Js = data['E_Js']
     J_list = data['J_list']
     mean_entropy = np.mean(entropies, axis=1)
-    dS_dJ = np.gradient(mean_entropy, J_list)[:-1] # shape (n_Js-1,)
-    dJs = np.diff(J_list) # shape (n_Js-1,)
-    w_fwd = dJs[:, np.newaxis, np.newaxis] * E_Js[:-1] # shape (n_Js-1, n_sims, n_sample_sweeps), J->J+, 
-    w_fwd_mean = w_fwd.mean(axis=(1,2)) # shape (n_Js-1,)
-    w_fwd_rate = w_fwd_mean / dJs # shape (n_Js-1,)
-    eta = -dS_dJ / w_fwd_rate
-    return eta, -dS_dJ, w_fwd_rate
+    dS_dJ = np.gradient(mean_entropy, J_list) # shape (n_Js,)
+    dW_dJ = E_Js.mean(axis=(1,2)) # shape (n_Js, n_sims, n_sample_sweeps), J->J+, 
+    eta = -dS_dJ / dW_dJ
+    return eta, -dS_dJ, dW_dJ
 
 def compute_eta_inferential(data):
     E_Js = data['E_Js']
